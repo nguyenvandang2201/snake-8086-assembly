@@ -1,145 +1,119 @@
-# 🐍 Game Snake - Assembly x86 (Team 22)
+# Snake 8086 — Team 22
 
-Trò chơi Snake cổ điển viết bằng ngôn ngữ Assembly x86 (8086), chạy trên trình giả lập **emu8086**. Người chơi điều khiển con rắn để ăn 4 chữ cái theo đúng thứ tự **N → A → K → E** (tạo thành từ "SNAKE") để chiến thắng.
+Trò chơi Snake chạy ở chế độ văn bản 80×25, được viết bằng Assembly x86 16-bit cho **emu8086**. Thay vì ăn mồi thông thường, người chơi phải thu thập lần lượt `N → A → K → E` để hoàn thành từ **SNAKE**.
 
----
+## Tính năng
 
-## 📋 Yêu cầu hệ thống
+- Vòng lặp game theo thời gian thực với điều khiển `W`, `A`, `S`, `D`.
+- Kiểm tra đúng thứ tự chữ ngay khi rắn ăn mồi.
+- Phát hiện va chạm với tường và thân rắn.
+- Chặn đổi hướng 180° khi rắn dài hơn một đốt.
+- Ba mạng; trạng thái ván được khởi tạo lại an toàn sau mỗi lần mất mạng.
+- Màn hình thắng/thua hỗ trợ chơi lại bằng `R`.
+- Có thể thoát bằng `Esc` trong lúc chơi hoặc tại màn hình kết thúc.
+
+## Yêu cầu
 
 | Thành phần | Yêu cầu |
-|---|---|
-| Trình giả lập | [emu8086](https://emu8086-microprocessor-emulator.en.softonic.com/) |
-| File include | `emu8086.inc` (đi kèm emu8086) |
-| Kiến trúc | x86 (8086), chế độ 16-bit real-mode |
-| Bộ nhớ video | Text mode 80×25, segment `0B800h` |
+| --- | --- |
+| Trình giả lập | emu8086 4.x |
+| File include | `emu8086.inc` đi kèm emu8086 |
+| Kiến trúc | x86 16-bit real mode |
+| Chế độ hiển thị | BIOS text mode 80×25, video segment `B800h` |
 
----
+> Mã nguồn dùng cú pháp MASM/TASM tương thích emu8086 và macro `GOTOXY` từ `emu8086.inc`.
 
-## 🚀 Cách chạy
+## Chạy game
 
-1. Mở **emu8086**.
+1. Cài đặt và mở **emu8086**.
 2. Mở file `game_snake.asm`.
-3. Nhấn **Compile** (F5) để dịch chương trình.
-4. Nhấn **Run** để chạy.
-5. Màn hình menu xuất hiện → nhấn bất kỳ phím nào để bắt đầu.
+3. Chọn **Compile** (`F5`).
+4. Chọn **Emulate**, sau đó **Run**.
+5. Nhấn phím bất kỳ tại màn hình giới thiệu để bắt đầu.
 
----
-
-## 🎮 Cách chơi
-
-### Mục tiêu
-Điều khiển con rắn (ký hiệu `S`) để ăn **4 chữ cái theo đúng thứ tự** sau:
-
-```
-'N'  →  'A'  →  'K'  →  'E'
-```
-
-Ăn đúng thứ tự → **WIN**. Ăn sai thứ tự hoặc đâm vào tường → **Mất mạng**.
-
-### Điều khiển
+## Cách chơi
 
 | Phím | Hành động |
-|------|-----------|
-| `W`  | Di chuyển lên |
-| `S`  | Di chuyển xuống |
-| `A`  | Di chuyển sang trái |
-| `D`  | Di chuyển sang phải |
-| `Esc`| Thoát (tại màn hình kết thúc) |
+| --- | --- |
+| `W` | Đi lên |
+| `A` | Sang trái |
+| `S` | Đi xuống |
+| `D` | Sang phải |
+| `R` | Chơi lại ở màn hình thắng/thua |
+| `Esc` | Thoát game |
 
-### Luật chơi
-- Con rắn bắt đầu ở giữa màn hình, biểu diễn bằng ký tự `S`.
-- Mỗi chữ cái ăn được sẽ nối thêm vào thân rắn.
-- Người chơi có **3 mạng** (hiển thị góc trên bên trái).
-- Mất mạng khi:
-  - Đâm vào **tường** (viền màn hình).
-  - Ăn sai thứ tự (ví dụ ăn `A` trước `N`) → mất mạng và restart.
-- Hết 3 mạng → **Game Over**.
-- Ăn đủ N, A, K, E đúng thứ tự → **You Win**.
+Rắn bắt đầu bằng ký tự `S`. Mỗi chữ đúng được nối vào thân rắn. Người chơi thắng khi thu thập đủ:
 
----
-
-## 🗺️ Cấu trúc chương trình
-
-```
-game_snake.asm
-│
-├── .Data          — Khai báo biến, chuỗi, vị trí chữ cái, thông tin rắn
-├── .Code
-│   ├── start          — Điểm bắt đầu: khởi tạo DS, ES (video segment)
-│   ├── screen_menu    — Hiển thị màn hình giới thiệu/menu
-│   ├── bild           — Vẽ màn hình chơi: viền, rắn, các chữ cái
-│   ├── move_left/right/up/down  — Xử lý di chuyển rắn
-│   ├── replace_address — Dịch chuyển mảng địa chỉ rắn (snake_address[])
-│   ├── eat            — Kiểm tra va chạm: chữ cái / tường / game over
-│   ├── move_snake     — Vẽ lại rắn lên video memory
-│   ├── border         — Tạo viền màn hình bằng BIOS int 10h
-│   ├── restart        — Reset rắn, chữ cái sau khi mất mạng
-│   ├── check_letters  — Kiểm tra thứ tự chữ cái → win hoặc lose mạng
-│   ├── win            — Hiển thị màn hình chiến thắng
-│   ├── game_over      — Hiển thị màn hình thua cuộc
-│   └── clear_all      — Xoá toàn bộ màn hình (BIOS int 10h scroll)
+```text
+S + N + A + K + E = SNAKE
 ```
 
----
+Người chơi mất một mạng nếu:
 
-## 🧠 Chi tiết kỹ thuật
+- chạm tường;
+- chạm thân rắn;
+- ăn một chữ không đúng thứ tự.
 
-### Bộ nhớ video (Video Memory)
-Chương trình ghi trực tiếp vào segment `0B800h` (text mode video buffer):
-- Mỗi ký tự chiếm **2 byte**: 1 byte ký tự + 1 byte màu sắc.
-- Màn hình 80 cột × 25 dòng → mỗi dòng = **160 byte**.
+Sau khi mất mạng, vị trí rắn và bốn chữ được thiết lập lại. Hết ba mạng sẽ kết thúc trò chơi.
 
-### Vị trí các chữ cái trên màn hình
-| Chữ cái | Địa chỉ offset (es:) |
-|---------|----------------------|
-| `N`     | `09B4h`              |
-| `A`     | `0848h`              |
-| `K`     | `06B0h`              |
-| `E`     | `01E8h`              |
+## Thiết kế kỹ thuật
 
-### Cấu trúc dữ liệu rắn
-```asm
-snake_address  dw 07D2h, 5 Dup(?)  ; Mảng địa chỉ video từng đốt rắn
-snake          db 'S',   5 Dup(?)  ; Mảng ký tự từng đốt rắn
-snake_len      db 1                ; Độ dài hiện tại của rắn
+Game ghi trực tiếp ký tự vào bộ nhớ video màu tại segment `B800h`. Mỗi ô màn hình dùng hai byte: một byte ký tự và một byte thuộc tính màu. Với 80 cột, mỗi hàng chiếm 160 byte.
+
+Luồng xử lý chính:
+
+```text
+Menu
+  ↓
+Khởi tạo ván → Đọc phím → Chờ khung hình → Di chuyển
+                    ↑                         ↓
+                    └──── tiếp tục ← Không va chạm
+                                              ↓
+                            Mất mạng / Thắng / Thoát
 ```
 
-### Hệ thống mạng sống
-```asm
-hlth    db 6    ; Mạng sống (mỗi mạng = 2 đơn vị, tổng 3 mạng)
-hlths   db "Lives:", 3, 3, 3   ; Hiển thị trên màn hình
+Các trạng thái quan trọng:
+
+| Biến | Ý nghĩa |
+| --- | --- |
+| `snake_addresses` | Địa chỉ video của đầu, thân và đuôi cũ |
+| `snake_chars` | Các ký tự tạo thành thân rắn |
+| `snake_length` | Số đốt đang hiển thị |
+| `letter_addresses` | Vị trí các chữ còn hoạt động |
+| `letters_left` | Số chữ chưa ăn |
+| `lives` | Số mạng còn lại |
+| `current_direction` | Hướng di chuyển hiện tại |
+
+Vị trí chữ trong video buffer:
+
+| Chữ | Offset |
+| --- | ---: |
+| `N` | `09B4h` |
+| `A` | `0848h` |
+| `K` | `06B0h` |
+| `E` | `01E8h` |
+
+## Cấu trúc repository
+
+```text
+.
+├── game_snake.asm   # Mã nguồn game
+├── README.md        # Tài liệu dự án
+├── .editorconfig    # Quy ước định dạng file
+└── .gitignore       # Bỏ qua file sinh ra bởi emulator/compiler
 ```
 
-### Ngắt được sử dụng
-| Ngắt | Chức năng |
-|------|-----------|
-| `INT 10h` (AH=00h) | Thiết lập chế độ video 80×25 text |
-| `INT 10h` (AH=06h) | Cuộn/xoá vùng màn hình (tạo viền) |
-| `INT 16h` (AH=01h) | Kiểm tra phím đã nhấn (non-blocking) |
-| `INT 16h` (AH=00h) | Đọc ký tự từ bàn phím |
-| `INT 21h` (AH=09h) | In chuỗi ký tự ra màn hình |
-| `INT 21h` (AH=07h) | Đọc ký tự không echo (chờ input) |
-| `INT 21h` (AH=4Ch) | Kết thúc chương trình |
+## Kiểm thử thủ công
 
----
+Sau khi compile, nên xác minh các trường hợp sau:
 
-## 📁 Cấu trúc thư mục
+- Các phím thường và hoa (`w/W`, `a/A`, `s/S`, `d/D`) đều hoạt động.
+- Không thể quay đầu trực tiếp khi rắn đã dài hơn một đốt.
+- Ăn sai chữ làm mất đúng một mạng và reset ván.
+- Chạm tường hoặc thân rắn làm mất đúng một mạng.
+- Ăn `N`, `A`, `K`, `E` đúng thứ tự mở màn hình chiến thắng.
+- `R` tạo game mới với ba mạng; `Esc` thoát sạch về DOS.
 
-```
-Game Snake Assembly/
-└── game_snake.asm   — File mã nguồn Assembly duy nhất
-```
+## Tác giả
 
----
-
-## 👥 Tác giả
-
-**TEAM 22** — Dự án môn học Kiến trúc máy tính / Lập trình Assembly.
-
----
-
-## 📌 Ghi chú
-
-- Chương trình sử dụng macro `GOTOXY` từ thư viện `emu8086.inc` để định vị con trỏ.
-- Hoạt động đúng nhất trên **emu8086 v4.x**.
-- Do ghi trực tiếp vào video memory (`0B800h`), chương trình cần chạy trong môi trường DOS hoặc giả lập DOS.
+**Team 22** — Bài tập lớn môn Hệ điều hành / Assembly x86, PTIT.

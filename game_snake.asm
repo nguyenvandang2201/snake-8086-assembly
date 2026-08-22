@@ -1,567 +1,651 @@
 include "emu8086.inc"
-.Model small 
 
-.Stack 100H   
+.MODEL small
+.STACK 100h
 
-.Data
-    ;main screen
-    screen1  db "Game Team 22$"
-    screen2  db "In this game you must eat 4 letters by sequence:$"
-    screen3  db "First eat 'N' then 'A' then 'K' then 'E'$"
-    screen4  db "Move the snake by pressing the keys w,a,s,d$"
-    screen5  db "w: move up$"
-    screen6  db "s: move down$"
-    screen7  db "d: move right$"
-    screen8  db "a: move left$"
-    screen9  db "The snake head is the 'S' in the middle of the screen$"
-    screen10 db "Press any key to start...$"
-    about db "This game is done by: TEAM 22$"   
-    
-    ;bild
-    hlths  db "Lives:",3,3,3    
-    
-    ;pos
-    posN EQU 09b4h
-    posA EQU 0848h
-    posK EQU 06b0h
-    posE EQU 01E8h
-    
-    ;ingame
-    letters_address  dw 09b4h,0848h,06b0h,01e8h,4 Dup(?)
-    dletters_address dw 09b4h,0848h,06b0h,01e8h,4 Dup(?)
-    letters_num  db 4
-    letters_num_check  db 4
-    hlth db 6   
-    
-    ;snake infomation
-    snake_address dw 07d2h,5 Dup(?)
-    snake db 'S',5 Dup(?)
-    snake_len db 1
-    
-    ;end
-    gmwin  db "You Win$"
-    gmov   db "Game Over$"
-    endtxt db "Press Esc to exit$"
+VIDEO_SEGMENT      EQU 0B800h
+ROW_SIZE_BYTES     EQU 160
+TOP_PLAY_OFFSET    EQU 320
+BOTTOM_WALL_OFFSET EQU 3840
+START_POSITION     EQU 07D2h
+MAX_SNAKE_LENGTH   EQU 5
+LETTER_COUNT       EQU 4
 
-.Code      
- 
+.DATA
+    ; Menu and status text
+    title_text       db "SNAKE - TEAM 22$"
+    objective_text   db "Collect the letters in this order: N -> A -> K -> E$"
+    controls_text    db "Move: W A S D    Exit: Esc$"
+    rules_text       db "A wrong letter, a wall, or your own body costs one life.$"
+    start_text       db "Press any key to start...$"
+    lives_text       db "Lives: $"
+    progress_text    db "Target: SNAKE$"
+
+    win_text         db "YOU WIN!$"
+    game_over_text   db "GAME OVER$"
+    end_text         db "Press R to play again or Esc to exit.$"
+
+    ; Fixed letter positions in the 80x25 text buffer
+    default_letter_addresses dw 09B4h, 0848h, 06B0h, 01E8h
+    letter_addresses         dw LETTER_COUNT Dup(0)
+    expected_letters         db "NAKE"
+
+    ; Six address slots are required: five visible segments plus the old tail.
+    snake_addresses dw (MAX_SNAKE_LENGTH + 1) Dup(0)
+    snake_chars     db (MAX_SNAKE_LENGTH + 1) Dup(0)
+    snake_length    db 1
+    letters_left    db LETTER_COUNT
+    lives           db 3
+    current_direction db 'D'
+    quit_requested  db 0
+
+.CODE
+
 start:
-    mov ax, @data    
-    mov ds, ax ;tro thanh ghi ds ve dau doan data
-    
-    mov ax, 0b800h ; 0B800h là vùng nho video trong che do van ban (text mode) 80x25
-    mov es, ax    
-    
-    cld ; DF = 0 
-    
-    
-    print_screen_menu:
-        call screen_menu ;print main screen: screen1 -> screen10      
-    
-    startag: ;start again
-    
-    call bild ;function display alphabet and border in game
-    
-    read: ;read cac cach di chuyen
-        mov ah, 1
-        int 16h       ;check xem co phim nao duoc nhan chua
-        jz right      ;neu khong co thi jump den right
-        
-        mov ah, 0     ;doc ki tu dem tu ban phim (lay ki tu vua nhan)
-        int 16h    
-        sub al, 20h   ;convert chu thuong -> chu hoa
-        mov dl, al
-        jmp right
-    
-    right:    
-        cmp dl, 'D'    ;di chuyen sang phai
-        jne left
-        call move_right
-        jmp read       ;nhay sang read cach di chuyen tiep theo
-    
-    left: 
-        cmp dl, 'A'
-        jne up
-        call move_left 
-        jmp read 
-    
-    up: 
-        cmp dl, 'W'
-        jne down
-        call move_up
-        jmp read 
-    
-    down: 
-        cmp dl, 'S'
-        jne read
-        call move_down
-        jmp read  
-    
-    exit:
-        call clear_all
-    ;return 0
-    mov ax, 4ch ; exit to operating system.
+    mov ax, @data
+    mov ds, ax
+    cld
+
+    call show_menu
+
+new_game:
+    mov lives, 3
+    mov quit_requested, 0
+    call reset_round
+    call draw_game
+
+game_loop:
+    call read_input
+    cmp quit_requested, 1
+    je exit_game
+
+    call wait_frame
+    call step_snake
+
+    cmp al, 1
+    je lose_life
+    cmp al, 2
+    je player_won
+    jmp game_loop
+
+lose_life:
+    dec lives
+    cmp lives, 0
+    je player_lost
+
+    call reset_round
+    call draw_game
+    jmp game_loop
+
+player_won:
+    call show_win_screen
+    cmp al, 1
+    je new_game
+    jmp exit_game
+
+player_lost:
+    call show_game_over_screen
+    cmp al, 1
+    je new_game
+
+exit_game:
+    call clear_screen
+    mov ax, 4C00h
     int 21h
-ends 
 
-screen_menu proc    ;ham in khung hinh tu screen1 den screen10
-    call border   
-    
-    ;in "Game Team 2"
-    GOTOXY 35, 2
-    lea dx, screen1 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 16, 6
-    lea dx, screen2 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 16, 7
-    lea dx, screen3 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 16, 8
-    lea dx, screen4 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 31, 10
-    lea dx, screen5 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 31, 11
-    lea dx, screen6 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 31, 12
-    lea dx, screen7 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 31, 13
-    lea dx, screen8 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 16, 15
-    lea dx, about 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 16, 16
-    lea dx, screen9 
-    mov ah,9
-    int 21h 
-    
-    GOTOXY 16, 19
-    lea dx, screen10 
-    mov ah,9
-    int 21h 
-    
-    ;Press any key to start
-    mov ah, 7     
+; -----------------------------------------------------------------------------
+; Screens
+; -----------------------------------------------------------------------------
+
+show_menu proc
+    call clear_screen
+    call draw_border
+
+    GOTOXY 31, 3
+    lea dx, title_text
+    call print_string
+
+    GOTOXY 13, 8
+    lea dx, objective_text
+    call print_string
+
+    GOTOXY 23, 11
+    lea dx, controls_text
+    call print_string
+
+    GOTOXY 10, 14
+    lea dx, rules_text
+    call print_string
+
+    GOTOXY 27, 19
+    lea dx, start_text
+    call print_string
+
+    mov ah, 07h
     int 21h
-    
-    ;xoa man hinh hien tai
-    call clear_all   
     ret
-screen_menu endp
+show_menu endp
 
-; Game screen
-bild proc           ;function display alphabet and border in game
-    call border     ;ham tao vien 
-    
-    ;display hlths: lives
-    lea si, hlths
-    mov di, 0
-    mov cx, 9  
-    lap1:   
-        movsb
-        inc di
-    loop lap1
-    
-    ;in "Game Team 2"
-    GOTOXY 68, 0
-    lea dx, screen1 
-    mov ah,9
-    int 21h 
-    
-    ;display snake and alphabet
-    xor dx, dx   
-    mov di, snake_address[0]    ; dia chi bat dau ran
-    mov dl, snake[0]            ; ki tu dai dien ran: 'S'
-    ;es: extra segment (es: 0b800h)
-    es: mov [di], dl          ; vi tri snake init
-    es: mov [posN], 'N'     ; vi tri cac chu cai tren screen
-    es: mov [posA], 'A'   
-    es: mov [posK], 'K'
-    es: mov [posE], 'E'
+draw_game proc
+    call clear_screen
+    call draw_border
+
+    GOTOXY 2, 0
+    lea dx, lives_text
+    call print_string
+    mov dl, lives
+    add dl, '0'
+    mov ah, 02h
+    int 21h
+
+    GOTOXY 33, 0
+    lea dx, progress_text
+    call print_string
+
+    GOTOXY 63, 0
+    lea dx, title_text
+    call print_string
+
+    call draw_letters
+    call draw_snake
     ret
-bild endp
+draw_game endp
 
-; snake move:
-move_left proc
-    push dx
-    call replace_address    ;ham thay doi dia chi snake in screen
-    sub snake_address[0], 2
-    call eat           
-    call move_snake    
-    pop dx
+show_win_screen proc
+    call clear_screen
+    call draw_border
+
+    GOTOXY 35, 11
+    lea dx, win_text
+    call print_string
+
+    GOTOXY 21, 14
+    lea dx, end_text
+    call print_string
+
+    call wait_for_replay
     ret
-move_left endp
+show_win_screen endp
 
-move_right proc
-    push dx
-    call replace_address 
-    add snake_address[0], 2
-    call eat         
-    call move_snake   
-    pop dx
+show_game_over_screen proc
+    call clear_screen
+    call draw_border
+
+    GOTOXY 34, 11
+    lea dx, game_over_text
+    call print_string
+
+    GOTOXY 21, 14
+    lea dx, end_text
+    call print_string
+
+    call wait_for_replay
     ret
-move_right endp
+show_game_over_screen endp
 
-move_up proc
-    push dx
-    call replace_address   
-    sub snake_address[0], 160      
-    call eat          
-    call move_snake   
-    pop dx
+wait_for_replay proc
+wait_for_replay_key:
+    mov ah, 07h
+    int 21h
+
+    cmp al, 1Bh
+    je replay_no
+    cmp al, 'r'
+    je replay_yes
+    cmp al, 'R'
+    je replay_yes
+    jmp wait_for_replay_key
+
+replay_yes:
+    mov al, 1
     ret
-move_up endp
 
-move_down proc
-    push dx
-    call replace_address 
-    add snake_address[0], 160		 
-    call eat         
-    call move_snake  
-    pop dx
+replay_no:
+    xor al, al
     ret
-move_down endp
+wait_for_replay endp
 
-replace_address proc  
+; -----------------------------------------------------------------------------
+; Input and timing
+; -----------------------------------------------------------------------------
+
+read_input proc
     push ax
-    xor ch, ch
-    xor bh, bh
-    mov cl, snake_len  ;cl: do dai cua ran hien tai     
-    inc cl
-    mov al, 2          ;moi phan tu chiem 2 byte
-    mul cl             ;ax = al * cl = 2 * snake_len
-    mov bl, al         ;vi tri cuoi cung trong snake_address             
-    xor dx, dx         ;bien temp  
-    
-    ;dich phan tu trong snake_address sang ben phai
-    shiftsnake:
-        mov dx, snake_address[bx-2] ;lay phan tu o vi tri (i - 1)
-        mov snake_address[bx], dx   ;gan vao vi tri i
-        sub bx, 2
-    loop shiftsnake:
+
+    mov ah, 01h
+    int 16h
+    jnz input_available
+    jmp input_done
+
+input_available:
+    mov ah, 00h
+    int 16h
+
+    cmp al, 1Bh
+    jne input_not_escape
+    mov quit_requested, 1
+    jmp input_done
+
+input_not_escape:
+    cmp al, 'a'
+    jb input_is_uppercase
+    cmp al, 'z'
+    ja input_is_uppercase
+    sub al, 20h
+
+input_is_uppercase:
+    cmp al, 'W'
+    je input_up
+    cmp al, 'S'
+    je input_down
+    cmp al, 'A'
+    je input_left
+    cmp al, 'D'
+    je input_right
+    jmp input_done
+
+input_up:
+    cmp snake_length, 1
+    jbe set_up
+    cmp current_direction, 'S'
+    je input_done
+set_up:
+    mov current_direction, 'W'
+    jmp input_done
+
+input_down:
+    cmp snake_length, 1
+    jbe set_down
+    cmp current_direction, 'W'
+    je input_done
+set_down:
+    mov current_direction, 'S'
+    jmp input_done
+
+input_left:
+    cmp snake_length, 1
+    jbe set_left
+    cmp current_direction, 'D'
+    je input_done
+set_left:
+    mov current_direction, 'A'
+    jmp input_done
+
+input_right:
+    cmp snake_length, 1
+    jbe set_right
+    cmp current_direction, 'A'
+    je input_done
+set_right:
+    mov current_direction, 'D'
+    jmp input_done
+
+input_done:
     pop ax
     ret
-replace_address endp
+read_input endp
 
-eat proc 
+wait_frame proc
     push ax
+    push cx
+    push dx
+
+    ; BIOS wait: 120,000 microseconds (0001:D4C0h).
+    mov ah, 86h
+    mov cx, 0001h
+    mov dx, 0D4C0h
+    int 15h
+    jnc frame_done
+
+    ; Small fallback for BIOS implementations without INT 15h/AH=86h.
+    mov cx, 0FFFFh
+frame_fallback:
+    loop frame_fallback
+
+frame_done:
+    pop dx
+    pop cx
+    pop ax
+    ret
+wait_frame endp
+
+; -----------------------------------------------------------------------------
+; Game state
+; -----------------------------------------------------------------------------
+
+reset_round proc
+    push ax
+    push bx
+    push cx
+    push si
+
+    mov snake_length, 1
+    mov letters_left, LETTER_COUNT
+    mov current_direction, 'D'
+
+    xor si, si
+    xor bx, bx
+    mov cx, MAX_SNAKE_LENGTH + 1
+clear_snake_state:
+    mov word ptr snake_addresses[si], 0
+    mov byte ptr snake_chars[bx], 0
+    add si, 2
+    inc bx
+    loop clear_snake_state
+
+    mov word ptr snake_addresses[0], START_POSITION
+    mov byte ptr snake_chars[0], 'S'
+
+    xor si, si
+    mov cx, LETTER_COUNT
+restore_letters:
+    mov bx, default_letter_addresses[si]
+    mov letter_addresses[si], bx
+    add si, 2
+    loop restore_letters
+
+    pop si
+    pop cx
+    pop bx
+    pop ax
+    ret
+reset_round endp
+
+step_snake proc
     push bx
     push cx
     push dx
     push si
     push di
 
-    mov di, snake_address[0]
-    ;neu khong co gi
-    es: cmp [di], 0
-    je no 
-    
-    ;neu co wall
-    es: cmp [di], 20h     ;so sanh voi space(wall)
-    je wall
-    
-    ;neu co letters
-    xor ch, ch
-    mov cl, letters_num   ;cl: so luong chu cai con lai (letters_num)
-    xor si, si            ;si = 0 (de duyet letters_address[])
-    lop:
-        cmp di, letters_address[si] ;so sanh di voi vi tri chu cai thu si
-        je eat_letters    ; neu trung thi jmp den eat_letters 
-        ;neu khong thi tiep tuc cmp voi cac phan tu con lai trong letters_address
-        add si, 2   ;si += 2 (moi phan tu la word)
-    loop lop    
-    jmp wall
-    
-    eat_letters:
-        mov letters_address[si], 0        
-                
-        ; Luu ký tu vào snake[]
-        xor bh, bh
-        mov bl, snake_len ;do dai hien tai cua ran
-        es: mov dl, [di]  ;[di]: ky tu an duoc
-        mov snake[bx], dl ;luu ky tu vao snake[]
+    call shift_snake_addresses
 
-        es: mov [di], 0
-        
-        ; tang do dai ran, giam so letters con lai    
-        add snake_len, 1
-        sub letters_num_check, 1
-    
-        cmp letters_num_check, 0  ;kiem tra xem con moi khong
-        je check_letters
-        jmp no    
-    wall:        
-        ;kiem tra cham bien tren, duoi
-        cmp di, 320    ;bien tren
-        jle die
-        cmp di, 3840   ;bien duoi
-        jge die
-        
-        ;kiem tra cham bien trai, phai
-        mov ax, di
-        mov bl, 160 ;160 byte/dong (80 cot * 2 byte)   
-        div bl      ;ax/bl -> ah = so du (vi tri cot: ah / 2)   
-        cmp ah, 0   ;bien trai
-        je die
-        
-        mov ax, di
-        mov bl, 160
-        div bl    
-        cmp ah, 158 ;bien phai
-        je die    
-        jmp no    
-    die:
-        ;giam mang song
-        xor bh, bh
-        mov bl, hlth
-        es: mov [bx+10], 0 ;xoa phan tu cuoi trong hlths tren man hinh
-        mov hlths[bx+2], 0 ;loai bo phan tu cuoi trong mang hlths
-        sub hlth, 2        ;giam mang song di 1 (moi mang = 2 byte)
-        cmp hlth, 0        ;kiem tra con mang khong
-        jne rest           ;neu con -> restart
-    
-        ; Neu khong con thi game over
-        pop ax
-        pop bx
-        pop cx
-        pop dx
-        pop si
-        pop di
-        call game_over    
-    rest:
-        pop ax
-        pop bx
-        pop cx
-        pop dx
-        pop si
-        pop di
-        call restart    
-    no:
-        pop ax
-        pop bx
-        pop cx
-        pop dx
-        pop si
-        pop di
+    mov al, current_direction
+    cmp al, 'A'
+    je step_left
+    cmp al, 'W'
+    je step_up
+    cmp al, 'S'
+    je step_down
+
+step_right:
+    add word ptr snake_addresses[0], 2
+    jmp step_check
+
+step_left:
+    sub word ptr snake_addresses[0], 2
+    jmp step_check
+
+step_up:
+    sub word ptr snake_addresses[0], ROW_SIZE_BYTES
+    jmp step_check
+
+step_down:
+    add word ptr snake_addresses[0], ROW_SIZE_BYTES
+
+step_check:
+    call check_collision
+    cmp al, 1
+    je step_done
+
+    push ax
+    call draw_snake
+    pop ax
+
+step_done:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
     ret
-eat endp
+step_snake endp
 
-move_snake proc 
+shift_snake_addresses proc
+    push ax
+    push bx
+    push cx
+    push dx
+
     xor ch, ch
-    xor si, si
-    xor dl, dl
+    mov cl, snake_length
     xor bx, bx
-    mov cl, snake_len
-    loopp:
-        mov di, snake_address[si] ;di: vi tri doan ran thu si (tu mang snake_address)
-        mov dl, snake[bx]         ;dl: ky tu doan ran thu bx (tu mang snake)
-        es: mov [di], dl          ;ghi ki tu len man hinh tai vi tri di
-        add si, 2
-        inc bx
-    loop loopp 
-    ;xoa phan tu cuoi cua ran tren man hinh
-    mov di, snake_address[si]
-    es: mov [di],0
-    ret
-move_snake endp
+    mov bl, snake_length
+    shl bx, 1
 
-border proc ; ham xác dinh gioi han duong di cua snake
-    mov ah, 0    ; Chuc nang "Set Video Mode" (Thiet lap che do man hinh)
-    mov al, 3    ; Che do 3: 80x25 text mode voi 16 mau
-    int 10h             
-    
-    mov ah, 6      ; Chuc nang cuon màn hình lên (Scroll Up Window)
-    mov al, 0      ; So dòng cuon (0 = xóa toàn bo vùng chon)
-    mov bh, 0FFh   ; Màu nen (0FFh = mau trang)  
-    
-    ; Vien tren
-    mov ch, 1      ; Dòng bat dau (y1 = 1)
-    mov cl, 0      ; Cot bat dau (x1 = 0)
-    mov dh, 1      ; Dòng ket thúc (y2 = 1)
-    mov dl, 80     ; Cot ket thúc (x2 = 80)     
-    int 10h    
-    
-    ; Vien duoi
-    mov ch, 24
-    mov cl, 0
-    mov dh, 24
-    mov dl, 79
-    int 10h     
-    
-    ; Vien trai
-    mov ch, 1
-    mov cl, 0
-    mov dh, 24
-    mov dl, 0
-    int 10h    
-    
-    ; Vien phai
-    mov ch, 1
-    mov cl, 79
-    mov dh, 24
-    mov dl, 79
-    int 10h 
-    ret
-border endp      
+shift_address_loop:
+    mov dx, snake_addresses[bx-2]
+    mov snake_addresses[bx], dx
+    sub bx, 2
+    loop shift_address_loop
 
-restart proc ;ham khoi dong lai game sau khi mat 1 mang
-    ;delete snake in screen
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+shift_snake_addresses endp
+
+; Return AL = 0 for a normal move, 1 for a lost life, 2 for a win.
+check_collision proc
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+
+    mov di, snake_addresses[0]
+
+    ; Top/bottom boundaries. Row 2 is the first playable row.
+    cmp di, TOP_PLAY_OFFSET
+    jae collision_check_bottom
+    jmp collision_bad
+
+collision_check_bottom:
+    cmp di, BOTTOM_WALL_OFFSET
+    jb collision_check_columns
+    jmp collision_bad
+
+    ; Left/right boundaries (byte offsets 0 and 158 on each 160-byte row).
+collision_check_columns:
+    mov ax, di
+    mov bl, ROW_SIZE_BYTES
+    div bl
+    cmp ah, 0
+    jne collision_check_right
+    jmp collision_bad
+
+collision_check_right:
+    cmp ah, 158
+    jne collision_check_self
+    jmp collision_bad
+
+    ; Self collision: compare the new head with every previous segment.
+collision_check_self:
     xor ch, ch
+    mov cl, snake_length
+    mov si, 2
+self_collision_loop:
+    cmp di, snake_addresses[si]
+    jne self_collision_next
+    jmp collision_bad
+
+self_collision_next:
+    add si, 2
+    loop self_collision_loop
+
+    ; Check whether the head reached one of the active letters.
     xor si, si
-    mov cl, snake_len
-    inc cl
-    delete:
-        mov di, snake_address[si]
-        es:mov [di], 0
-        add si, 2
-    loop delete
-    
-    mov letters_num_check, 4
-    
-    ;reset snake_address[], snake[]
-    mov snake_address, 07D2h
-    mov cl, snake_len
-    inc cl
+    mov cx, LETTER_COUNT
+letter_collision_loop:
+    cmp di, letter_addresses[si]
+    je collision_letter
+    add si, 2
+    loop letter_collision_loop
+
+    xor al, al
+    jmp collision_done
+
+collision_letter:
+    mov ax, VIDEO_SEGMENT
+    mov es, ax
+    mov dl, es:[di]
+
+    xor bx, bx
+    mov bl, snake_length
+    dec bx
+    cmp dl, expected_letters[bx]
+    jne collision_bad
+
+    inc bx
+    mov snake_chars[bx], dl
+    mov word ptr letter_addresses[si], 0
+    inc snake_length
+    dec letters_left
+
+    cmp letters_left, 0
+    je collision_win
+
+    xor al, al
+    jmp collision_done
+
+collision_win:
+    mov al, 2
+    jmp collision_done
+
+collision_bad:
+    mov al, 1
+
+collision_done:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    ret
+check_collision endp
+
+; -----------------------------------------------------------------------------
+; Rendering
+; -----------------------------------------------------------------------------
+
+draw_letters proc
+    push ax
+    push bx
+    push cx
+    push di
+    push si
+
+    mov ax, VIDEO_SEGMENT
+    mov es, ax
     xor si, si
-    inc si
-    xor di, di
-    add di, 2
-    empty:
-        mov snake[si], 0
-        mov snake_address[di], 0
-        add di, 2
-        inc si
-    loop empty
-    
-    ;reset letters_address[]
+    xor bx, bx
+    mov cx, LETTER_COUNT
+
+draw_letter_loop:
+    mov di, letter_addresses[si]
+    cmp di, 0
+    je skip_letter
+    mov al, expected_letters[bx]
+    mov es:[di], al
+
+skip_letter:
+    add si, 2
+    inc bx
+    loop draw_letter_loop
+
+    pop si
+    pop di
+    pop cx
+    pop bx
+    pop ax
+    ret
+draw_letters endp
+
+draw_snake proc
+    push ax
+    push bx
+    push cx
+    push di
+    push si
+
+    mov ax, VIDEO_SEGMENT
+    mov es, ax
+
+    ; Erase the old tail stored immediately after the visible segments.
+    xor bx, bx
+    mov bl, snake_length
+    shl bx, 1
+    mov di, snake_addresses[bx]
+    cmp di, 0
+    je draw_visible_snake
+    mov byte ptr es:[di], 0
+
+draw_visible_snake:
     xor ch, ch
-    mov cl, letters_num
+    mov cl, snake_length
     xor si, si
-    reset_leters:
-        mov bx, dletters_address[si]
-        mov letters_address[si], bx
-        add si, 2
-    loop reset_leters
-    
-    ;reset snake_len, head snake
-    mov snake_len, 1
-    xor si, si
-    mov snake[si], 'S'
-    
-    jmp startag 
-    ret    
-restart endp
+    xor bx, bx
 
-check_letters proc 
-    call move_snake ;cap nhat vi tri ran tren man hinh
-    
-    ;ktra xem co dung thu tu SNAKE khong
-    cmp snake[1],'N'
-    jne endtest1   
-    cmp snake[2],'A'
-    jne endtest1
-    cmp snake[3],'K'
-    jne endtest1
-    cmp snake[4],'E'
-    jne endtest1
-    call win  
-    
-    endtest1:
-        ;giam mang song
-        xor bh, bh
-        mov bl, hlth
-        es: mov [bx+10], 0
-        mov hlths[bx+2], 0
-        sub hlth, 2
-        cmp hlth, 0
-        jne restc
-        call game_over           
-    restc:
-        call restart 
+draw_snake_loop:
+    mov di, snake_addresses[si]
+    mov al, snake_chars[bx]
+    mov es:[di], al
+    add si, 2
+    inc bx
+    loop draw_snake_loop
+
+    pop si
+    pop di
+    pop cx
+    pop bx
+    pop ax
     ret
-check_letters endp
+draw_snake endp
 
-win proc 
-    call clear_all 
-    call border 
-    
-    ;in ra: "You Win"
-    GOTOXY 38, 13
-    lea dx, gmwin
-    mov ah,9
-    int 21h 
-    
-    ;in ra: "Press Esc to exit"
-    GOTOXY 34, 14
-    lea dx, endtxt
-    mov ah,9
-    int 21h 
-    
-    quit_win:
-        mov ah, 7   ;nhap 1 ki tu khong echo
-        int 21h
-        cmp al, 1bh ; cmp al, esc
-        je exit
-        jmp quit_win   
+draw_border proc
+    push ax
+    push cx
+    push di
+
+    mov ax, VIDEO_SEGMENT
+    mov es, ax
+    mov ax, 0B23h                 ; cyan '#' on black
+
+    mov di, ROW_SIZE_BYTES       ; row 1
+    mov cx, 80
+    rep stosw
+
+    mov di, BOTTOM_WALL_OFFSET   ; row 24
+    mov cx, 80
+    rep stosw
+
+    mov di, TOP_PLAY_OFFSET      ; rows 2 through 23
+    mov cx, 22
+draw_vertical_borders:
+    mov es:[di], ax
+    mov es:[di+158], ax
+    add di, ROW_SIZE_BYTES
+    loop draw_vertical_borders
+
+    pop di
+    pop cx
+    pop ax
     ret
-win endp   
+draw_border endp
 
-game_over proc 
-    call clear_all 
-    call border
-    
-    ;in "Game Over"
-    GOTOXY 37, 13
-    lea dx, gmov 
-    mov ah,9
-    int 21h 
-    
-    ;in "Press Esc to exit"
-    GOTOXY 34, 14
-    lea dx, endtxt   
-    mov ah,9
-    int 21h 
-    
-    quit_lose:
-        mov ah, 7
-        int 21h
-        cmp al, 1bh 
-        je exit
-        jmp quit_lose
+print_string proc
+    mov ah, 09h
+    int 21h
     ret
-game_over endp
+print_string endp
 
-clear_all proc ;ham xoa noi dung man hinh van ban 
-    xor cx, cx   ;row start = 0, col start = 0
-    mov dh, 24   ;row end = 24
-    mov dl, 79   ;col end = 79
-    mov bh, 7    ;white(text) on black(background)
-    mov ax, 700h ;ah = 07h (scroll), al = 00h (clear)
-    int 10h    
+clear_screen proc
+    push ax
+    mov ax, 0003h
+    int 10h
+    pop ax
     ret
-clear_all endp 
+clear_screen endp
 
-end start 
+END start

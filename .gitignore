@@ -1,0 +1,15 @@
+# emu8086 / MASM / TASM build outputs
+*.bin
+*.com
+*.exe
+*.lst
+*.map
+*.obj
+
+# Emulator and editor state
+*.bak
+*.tmp
+*.user
+.idea/
+.vscode/
+Thumbs.db
